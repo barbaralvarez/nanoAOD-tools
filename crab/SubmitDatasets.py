@@ -86,7 +86,10 @@ def CrateCrab_cfg(datasetName, isData = False, isTest = False, productionTag = '
 
   # Set according to username
   username = getpass.getuser()
-  basedir = '/store/user/' + username + '/nanoAODcrab'
+  #basedir = '/store/user/' + username + '/nanoAODcrab'
+  #basedir = '/store/user/' + username + '/nanoAODtest'
+  #basedir = '/store/user/' + username + '/TnPntuplesttH'
+  basedir = '/store/user/' + username + '/TnP_ttH2017'
 
   # Detect if it's MC or DATA and set parameters
   strSplitting = "FileBased"; # MC
@@ -98,7 +101,7 @@ def CrateCrab_cfg(datasetName, isData = False, isTest = False, productionTag = '
   CreateCrabScriptSh(crabname, craboptions)
   
   crabScriptSH = crabname + '.sh'
-  slimeFileName = 'SlimFile' if not 'TnP' in options else 'SlimFileTnP'
+  slimeFileName = 'SlimFileTnPmuon' if not 'ele' in options else 'SlimFileTnPele'
   lumijson = ''
   
   if(isData): 

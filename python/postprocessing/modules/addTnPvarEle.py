@@ -9,11 +9,11 @@ from PhysicsTools.NanoAODTools.postprocessing.modules.jme.JetReCalibrator import
 
 doCalculateJecLepAwareFromNanoAOD = True
 
-class addTnPvarMuon(Module):
+class addTnPvarEle(Module):
     def __init__(self, isdata = False, year = 17, recalibjets = '', era = ''):
-      print 'Initializing addTnPvarMuon...'
+      print 'Initializing addTnPvarEle...'
       #self.kProbePt = 12
-      self.kProbePt = 5
+      self.kProbePt = 7
       self.kTagPt   = 29
       self.kTagIso  = 0.20
       self.kMaxMass = 140
@@ -85,10 +85,13 @@ class addTnPvarMuon(Module):
         self.out.branch("Probe_conept",    "F")
         self.out.branch("Probe_jetbtagdeepcsv", "F")
         self.out.branch("Probe_pdgId", "I")
-        self.out.branch("Probe_segmentComp", "F")
         self.out.branch("Probe_mvaTTH",      "F")
-        #self.out.branch("Probe_looseId",     "I") # to be added for v5 nanoAOD
-        self.out.branch("Probe_tightCharge", "I")
+        self.out.branch("Probe_mvaFall17V2noIso_WPL",  "F")
+        self.out.branch("Probe_mvaFall17V2noIso",  "F")
+        self.out.branch("Probe_lostHits",              "F")
+        self.out.branch("Probe_tightCharge",           "I")
+        self.out.branch("Probe_convVeto",              "I")
+        self.out.branch("Probe_ttH_idEmu_cuts_E3",   "I")
 
         self.out.branch("Probe_passDptPt02",      "I")
         self.out.branch("Probe_passSIP4",         "I")
@@ -123,11 +126,11 @@ class addTnPvarMuon(Module):
         
     def endFile(self, inputFile, outputFile, inputTree, wrappedOutputTree):
         pass
-    def IsMatched(self, muonLorentzVector, trigObjCollection):
+    def IsMatched(self, electronLorentzVector, trigObjCollection):
       dRmin = 0.1
       match = False
       for trigObj in trigObjCollection:
-        dR = muonLorentzVector.DeltaR(trigObj)
+        dR = electronLorentzVector.DeltaR(trigObj)
         if dR < dRmin: match = True
       return match
 
@@ -139,51 +142,53 @@ class addTnPvarMuon(Module):
         return JetReCalibrator(fileNameJEC, jetType , doRes, jesInputFilePath, upToLevel=1)
 
     def analyze(self, event):
-        # Get Jet and Muon collections
-        jet  = Collection(event, 'Jet')
-        muon = Collection(event, 'Muon')
-        trigObj = Collection(event, 'TrigObj')
+        # Get Jet and Ele collections
+        jet      = Collection(event, 'Jet')
+        electron = Collection(event, 'Electron')
+        trigObj  = Collection(event, 'TrigObj')
 
-        #### Construct the trigger object collection containing muons triggering a single iso muon trigger
+        #### Construct the trigger object collection containing electrons triggering a single iso electron trigger
         selTrigObj = []
         for tr in trigObj:
-          if not abs(tr.id) == 13: continue
-          #print 'Trig muon found! with filterBits: ', tr.filterBits
+          if not abs(tr.id) == 11: continue
+          #print 'Trig electron found! with filterBits: ', tr.filterBits
           if not (bool(tr.filterBits & 2) or bool(tr.filterBits & 8)): continue
           t = TLorentzVector()
-          t.SetPtEtaPhiM(tr.pt, tr.eta, tr.phi, 0.105)
+          t.SetPtEtaPhiM(tr.pt, tr.eta, tr.phi, 0.000510)
           selTrigObj.append(t)
         #print 'len(selTrigObj) = ', len(selTrigObj)
 
-        #### Selection of tag and probe muons
+        #### Selection of tag and probe electrons
         # Tag: pT, eta, tightId, iso
         # Probe: pT, eta
         tags = []; probes = []; pair = []
         index = 0
-        for mu in muon:
-          if not abs(mu.eta) < 2.4 or not mu.pt > self.kProbePt: 
+        for ele in electron:
+          if not abs(ele.eta) < 2.5 or not ele.pt > self.kProbePt: 
             index += 1
             continue
-          if mu.pt > self.kTagPt and mu.tightId and mu.pfRelIso04_all < self.kTagIso:  
+          if ele.pt > self.kTagPt and ele.cutBased>= 4 and ele.jetRelIso < self.kTagIso:  
             tp = TLorentzVector()
-            tp.SetPtEtaPhiM(mu.pt, mu.eta, mu.phi, mu.mass)
+            tp.SetPtEtaPhiM(ele.pt, ele.eta, ele.phi, ele.mass)
             if self.IsMatched(tp, selTrigObj): tags.append(index)
           else: probes.append(index)
           index+=1
         if len(tags) == 0:              return False
         if len(tags) + len(probes) < 2: return False
+        #print 'len(tags) =', len(tags)
+        #print 'len(probes) =', len(probes)
 
         ### Forming TnP pairs with leptons passing Tag selection
-        ### If two tight muons, you have two TnP pairs!
+        ### If two tight electrons, you have two TnP pairs!
         ### If one tag has more than one probe candidate, the pairs are not selected
         for t1 in tags:
           nProbesFound = 0
           tp1 = TLorentzVector()
-          tp1.SetPtEtaPhiM(muon[t1].pt, muon[t1].eta, muon[t1].phi, muon[t1].mass)
+          tp1.SetPtEtaPhiM(electron[t1].pt, electron[t1].eta, electron[t1].phi, electron[t1].mass)
           for t2 in tags:
             if t2 == t1: continue
             tp2 = TLorentzVector()
-            tp2.SetPtEtaPhiM(muon[t2].pt, muon[t2].eta, muon[t2].phi, muon[t2].mass)
+            tp2.SetPtEtaPhiM(electron[t2].pt, electron[t2].eta, electron[t2].phi, electron[t2].mass)
             mass = (tp1+tp2).M()
             if mass > self.kMaxMass or mass < self.kMinMass: continue
             ### The tag must match a trigger object:
@@ -197,10 +202,10 @@ class addTnPvarMuon(Module):
         for t in tags:
           nProbesFound = 0
           tp = TLorentzVector()
-          tp.SetPtEtaPhiM(muon[t].pt, muon[t].eta, muon[t].phi, muon[t].mass)
+          tp.SetPtEtaPhiM(electron[t].pt, electron[t].eta, electron[t].phi, electron[t].mass)
           for p in probes:
             pp = TLorentzVector()
-            pp.SetPtEtaPhiM(muon[p].pt, muon[p].eta, muon[p].phi, muon[p].mass)
+            pp.SetPtEtaPhiM(electron[p].pt, electron[p].eta, electron[p].phi, electron[p].mass)
             mass = (tp+pp).M()
             if mass > self.kMaxMass or mass < self.kMinMass: continue
             ### The tag must match a trigger object:
@@ -221,17 +226,17 @@ class addTnPvarMuon(Module):
         for thisPair in pair:
           ti, pi = thisPair
           ptag = TLorentzVector(); ppro = TLorentzVector()
-          ptag.SetPtEtaPhiM(muon[ti].pt, muon[ti].eta, muon[ti].phi, muon[ti].mass)
-          ppro.SetPtEtaPhiM(muon[pi].pt, muon[pi].eta, muon[pi].phi, muon[pi].mass)
+          ptag.SetPtEtaPhiM(electron[ti].pt, electron[ti].eta, electron[ti].phi, electron[ti].mass)
+          ppro.SetPtEtaPhiM(electron[pi].pt, electron[pi].eta, electron[pi].phi, electron[pi].mass)
           mass        = (ptag+ppro).M()
 
-          # Trigger requirement... IsoMu27
+          # Trigger requirement... IsoEle
           if   self.year == 17:
-            passTrigger = event.HLT_IsoMu27
+            passTrigger = event.HLT_Ele35_WPTight_Gsf
           elif self.year == 16:
-            passTrigger = event.HLT_IsoMu24 or event.HLT_IsoTkMu24
+            passTrigger = event.XXX or event.XXX
           elif self.year == 18:
-            passTrigger = event.HLT_IsoMu24
+            passTrigger = event.XXX
         
           # Compute HT and MET
           ht = 0; met = event.METFixEE2017_pt if self.year == 17 else event.MET_pt
@@ -241,99 +246,97 @@ class addTnPvarMuon(Module):
             else:
               ht += j.pt if j.pt > 30 else 0
 
-          isdata = 0 if hasattr(event, 'Muon_genPartFlav') else 1
+          isdata = 0 if hasattr(event, 'Elecrton_genPartFlav') else 1
 
           # Tag kinematics
-          self.out.fillBranch("Tag_pt",    muon[ti].pt)
-          self.out.fillBranch("Tag_eta",   muon[ti].eta)
-          self.out.fillBranch("Tag_phi",   muon[ti].phi)
-          self.out.fillBranch("Tag_mass",  muon[ti].mass)
-          self.out.fillBranch("Tag_charge",muon[ti].charge)
-          self.out.fillBranch("Tag_iso",   muon[ti].pfRelIso04_all)
-          self.out.fillBranch("Tag_dz",    muon[ti].dz)
-          self.out.fillBranch("Tag_dxy",   muon[ti].dxy)
+          self.out.fillBranch("Tag_pt",    electron[ti].pt)
+          self.out.fillBranch("Tag_eta",   electron[ti].eta)
+          self.out.fillBranch("Tag_phi",   electron[ti].phi)
+          self.out.fillBranch("Tag_mass",  electron[ti].mass)
+          self.out.fillBranch("Tag_charge",electron[ti].charge)
+          self.out.fillBranch("Tag_iso",   electron[ti].jetRelIso)
+          self.out.fillBranch("Tag_dz",    electron[ti].dz)
+          self.out.fillBranch("Tag_dxy",   electron[ti].dxy)
 
-          tagMatch = 1 if isdata else (muon[ti].genPartFlav == 1 or muon[ti].genPartFlav == 15)
+          tagMatch = 1 if isdata else (electron[ti].genPartFlav == 1 or electron[ti].genPartFlav == 15)
           self.out.fillBranch("Tag_isGenMatched", tagMatch)
 
           # Probe kinematics
-          self.out.fillBranch("Probe_pt",          muon[pi].pt)
-          self.out.fillBranch("Probe_eta",         muon[pi].eta)
-          self.out.fillBranch("Probe_phi",         muon[pi].phi)
-          self.out.fillBranch("Probe_mass",        muon[pi].mass)
-          self.out.fillBranch("Probe_charge",      muon[pi].charge)
-          self.out.fillBranch("Probe_dxy",         muon[pi].dxy)
-          self.out.fillBranch("Probe_dz",          muon[pi].dz)
-          self.out.fillBranch("Probe_SIP3D",       muon[pi].sip3d)
-          self.out.fillBranch("Probe_iso",         muon[pi].pfRelIso04_all)
-          self.out.fillBranch("Probe_miniiso",     muon[pi].miniPFRelIso_all)
-          self.out.fillBranch("Probe_segmentComp", muon[pi].segmentComp)
-          self.out.fillBranch("Probe_mvaTTH",      muon[pi].mvaTTH)
-          #self.out.fillBranch("Probe_looseId",     muon[pi].looseId)
-          self.out.fillBranch("Probe_tightCharge", muon[pi].tightCharge)
+          self.out.fillBranch("Probe_pt",                    electron[pi].pt)
+          self.out.fillBranch("Probe_eta",                   electron[pi].eta)
+          self.out.fillBranch("Probe_phi",                   electron[pi].phi)
+          self.out.fillBranch("Probe_mass",                  electron[pi].mass)
+          self.out.fillBranch("Probe_charge",                electron[pi].charge)
+          self.out.fillBranch("Probe_dxy",                   electron[pi].dxy)
+          self.out.fillBranch("Probe_dz",                    electron[pi].dz)
+          self.out.fillBranch("Probe_SIP3D",                 electron[pi].sip3d)
+          self.out.fillBranch("Probe_iso",                   electron[pi].jetRelIso)
+          self.out.fillBranch("Probe_miniiso",               electron[pi].miniPFRelIso_all)
+          self.out.fillBranch("Probe_mvaTTH",                electron[pi].mvaTTH)
+          self.out.fillBranch("Probe_mvaFall17V2noIso_WPL",  electron[pi].mvaFall17V2noIso_WPL)
+          self.out.fillBranch("Probe_lostHits",              electron[pi].lostHits)
+          self.out.fillBranch("Probe_tightCharge",           electron[pi].tightCharge)
 
           # Probe ID and ISO flags (from nanoAOD tag IDs)
           self.out.fillBranch("Probe_passL",         1)
-          self.out.fillBranch("Probe_passM",         muon[pi].mediumId)
-          self.out.fillBranch("Probe_passMP",        muon[pi].mediumPromptId)
-          self.out.fillBranch("Probe_passT",         muon[pi].tightId)
-          self.out.fillBranch("Probe_passRelIsoVL",  muon[pi].pfRelIso04_all <= 0.4)
-          self.out.fillBranch("Probe_passRelIsoM",   muon[pi].pfRelIso04_all <= 0.25)
-          self.out.fillBranch("Probe_passRelIsoL",   muon[pi].pfRelIso04_all <= 0.20)
-          self.out.fillBranch("Probe_passRelIsoT",   muon[pi].pfRelIso04_all <= 0.15)
-          self.out.fillBranch("Probe_passMiniIsoL",  muon[pi].miniPFRelIso_all < 0.4)
-          self.out.fillBranch("Probe_passMiniIsoT",  muon[pi].miniPFRelIso_all < 0.2)
-          self.out.fillBranch("Probe_passMiniIsoVT", muon[pi].miniIsoId >= 4)
+          self.out.fillBranch("Probe_passM",         electron[pi].cutBased==3)
+          self.out.fillBranch("Probe_passMP",        electron[pi].cutBased==3)
+          self.out.fillBranch("Probe_passT",         electron[pi].cutBased>= 4)
+          self.out.fillBranch("Probe_passRelIsoVL",  electron[pi].jetRelIso <= 0.4)
+          self.out.fillBranch("Probe_passRelIsoM",   electron[pi].jetRelIso <= 0.25)
+          self.out.fillBranch("Probe_passRelIsoL",   electron[pi].jetRelIso <= 0.20)
+          self.out.fillBranch("Probe_passRelIsoT",   electron[pi].jetRelIso <= 0.15)
+          self.out.fillBranch("Probe_passMiniIsoL",  electron[pi].miniPFRelIso_all < 0.4)
+          self.out.fillBranch("Probe_passMiniIsoT",  electron[pi].miniPFRelIso_all < 0.2)
+          self.out.fillBranch("Probe_passMiniIsoVT", electron[pi].miniPFRelIso_all < 0.1)
 
-          probeMatch = 1 if isdata else (muon[pi].genPartFlav == 1 or muon[pi].genPartFlav == 15)
+          probeMatch = 1 if isdata else (electron[pi].genPartFlav == 1 or electron[pi].genPartFlav == 15)
           self.out.fillBranch("Probe_isGenMatched", probeMatch)
 
           # Other working points: SIP2D and dpt/pt
-          self.out.fillBranch("Probe_passDptPt02",   muon[pi].ptErr/muon[pi].pt < 0.2)
-          self.out.fillBranch("Probe_passSIP4",      muon[pi].sip3d < 4)
-          self.out.fillBranch("Probe_passSIP8",      muon[pi].sip3d < 8)
+          self.out.fillBranch("Probe_passDptPt02",   electron[pi].pt/electron[pi].pt < 0.2) #pterr not defined for electrons
+          self.out.fillBranch("Probe_passSIP4",      electron[pi].sip3d < 4)
+          self.out.fillBranch("Probe_passSIP8",      electron[pi].sip3d < 8)
 
           # Probe Lepton MVA (from nanoAOD, for the moment)
-          self.out.fillBranch("Probe_passMVAL",      muon[pi].mvaId >= 1)
-          self.out.fillBranch("Probe_passMVAM",      muon[pi].mvaId >= 2)
-          self.out.fillBranch("Probe_passMVAT",      muon[pi].mvaId >= 3)
+          self.out.fillBranch("Probe_passMVAL",      1) #mvaID not defined for electrons
+          self.out.fillBranch("Probe_passMVAM",      1)
+          self.out.fillBranch("Probe_passMVAT",      1)
 
           # MultiIso... calculate jet-JecLepAware ptRel, ptRatio
-          jetId = muon[pi].jetIdx
-          MiniRelIso = muon[pi].miniPFRelIso_all
-          jetRelIso  = muon[pi].jetRelIso # jetRelIso = 1/ptRatio - 1
-          segmentComp = muon[pi].segmentComp
-          mvaTTH = muon[pi].mvaTTH
-          pdgId = muon[pi].pdgId
-          passM = muon[pi].mediumId
-          if passM >0 and mvaTTH>0.9:   
-              conept = muon[pi].pt 
-          else:
-              conept = 0.90 * muon[pi].pt * (1 + jetRelIso)
-
+          jetId = electron[pi].jetIdx
+          MiniRelIso = electron[pi].miniPFRelIso_all
+          jetRelIso  = electron[pi].jetRelIso # jetRelIso = 1/ptRatio - 1
+          mvaTTH           = electron[pi].mvaTTH
+          pdgId            = electron[pi].pdgId
+          mvaFall17V2noIso = electron[pi].mvaFall17V2Iso
+          lostHits         = electron[pi].lostHits
+          tightCharge      = electron[pi].tightCharge
+          convVeto         = electron[pi].convVeto
           if jetId == -1: # No jet matching....
             ptRel = 0
             ptRatio = 1/(jetRelIso + 1)
             jetbtagdeepcsv = 0
           else:
-            # from Muon_jetRelIso in nanoAOD
+            # from Ele_jetRelIso in nanoAOD
             if doCalculateJecLepAwareFromNanoAOD:
-              jetRelIso  = muon[pi].jetRelIso # jetRelIso = 1/ptRatio - 1
+              jetRelIso  = electron[pi].jetRelIso # jetRelIso = 1/ptRatio - 1
               ptRatio = 1/(jetRelIso + 1)
               jetbtagdeepcsv = jet[jetId].btagDeepB
-              jetJECLepAwarePt = muon[pi].pt*(jetRelIso + 1)
+              jetJECLepAwarePt = electron[pi].pt*(jetRelIso + 1)
               lp = TLorentzVector(); jt = TLorentzVector()
-              lp.SetPtEtaPhiM(muon[pi].pt, muon[pi].eta, muon[pi].phi, muon[pi].mass)
+              lp.SetPtEtaPhiM(electron[pi].pt, electron[pi].eta, electron[pi].phi, electron[pi].mass)
               jt.SetPtEtaPhiM(jetJECLepAwarePt,  jet[jetId].eta,  jet[jetId].phi,  jet[jetId].mass)
               ptRel = lp.Perp((jt-lp).Vect())
             else:
               j = jet[jetId]
               corr = self.jetReCalibrator.getCorrection(j, rho)
               #print 'corr = %1.2f, jet Pt = %1.2f' %(corr, j.pt)
-              ptRel = self.ptRelv2(muon[pi], j, corr)
+              ptRel = self.ptRelv2(electron[pi], j, corr)
               #print 'ptRel = ', ptRel
-              ptRatio = muon[pi].pt/self.jetLepAwareJEC(muon[pi], j, corr).Pt()
+              ptRatio = electron[pi].pt/self.jetLepAwareJEC(electron[pi], j, corr).Pt()
               #print 'ptRatio = ', ptRatio
+
 
           # Definitions from https://twiki.cern.ch/twiki/bin/viewauth/CMS/SUSLeptonSF
           passMultiIsoL =       MiniRelIso < 0.20 and (ptRatio > 0.69 or ptRel > 6.0) 
@@ -341,7 +344,25 @@ class addTnPvarMuon(Module):
           passMultiIsoM2017   = MiniRelIso < 0.12 and (ptRatio > 0.80 or ptRel > 7.5) 
           passMultiIsoM2017v2 = MiniRelIso < 0.11 and (ptRatio > 0.74 or ptRel > 6.8) 
 
-          passttH = conept > 10 and jetbtagdeepcsv < 0.4941 and mvaTTH>0.90 
+          #if (abs(pdgId)!=11): ttH_idEmu_cuts_E3 = True
+          #if (lep.hoe>=(0.10-0.00*(abs(lep.deltaEtaSC+lep.eta)>1.479))): return False
+          #if (lep.eInvMinusPInv<=-0.04): return False
+          #if (lep.sieie>=(0.011+0.019*(abs(lep.deltaEtaSC+lep.eta)>1.479))): return False
+          #return True
+
+          if mvaTTH > 0.90: 
+              conept =  electron[pi].pt 
+          else:
+              conept = 0.90 * electron[pi].pt * (1 + jetRelIso)
+ 
+              
+          ttH_idEmu_cuts_E3 = 1
+          if (abs(electron[pi].pdgId)!=11)             : ttH_idEmu_cuts_E3 = 1
+          if (electron[pi].eInvMinusPInv<=-0.04)       : ttH_idEmu_cuts_E3 = 0
+          if (electron[pi].hoe>=(0.10-0.00*(abs(electron[pi].deltaEtaSC+electron[pi].eta)>1.479)))    : ttH_idEmu_cuts_E3 = 0
+          if (electron[pi].sieie>=(0.011+0.019*(abs(electron[pi].deltaEtaSC+electron[pi].eta)>1.479))): ttH_idEmu_cuts_E3 = 0
+
+          passttH = conept > 10 and jetbtagdeepcsv < 0.4941 and ttH_idEmu_cuts_E3 and convVeto and lostHits==0 and mvaTTH>0.90  
          
           #print 'passMultiIsoL = ', passMultiIsoL
           self.out.fillBranch("Probe_passMultiIsoL",       passMultiIsoL)
@@ -354,7 +375,10 @@ class addTnPvarMuon(Module):
           self.out.fillBranch("Probe_jetRelIso",           jetRelIso)
           self.out.fillBranch("Probe_conept",              conept)
           self.out.fillBranch("Probe_jetbtagdeepcsv",      jetbtagdeepcsv)
+          self.out.fillBranch("Probe_mvaFall17V2noIso",    mvaFall17V2noIso)
           self.out.fillBranch("Probe_pdgId",               pdgId)
+          self.out.fillBranch("Probe_convVeto",            convVeto)
+          self.out.fillBranch("Probe_ttH_idEmu_cuts_E3",   ttH_idEmu_cuts_E3)
 
           # TnP variables
           self.out.fillBranch("TnP_mass",     mass);
@@ -366,17 +390,17 @@ class addTnPvarMuon(Module):
         return False
 
 # define modules using the syntax 'name = lambda : constructor' to avoid having them loaded when not needed
-addTnPMuon16 = lambda : addTnPvarMuon(0,16)
-#addTnPMuon17 = lambda : addTnPvarMuon(0,17,"Fall17_17Nov2017_V32_MC")
-addTnPMuon17 = lambda : addTnPvarMuon(0,17)
-addTnPMuon18 = lambda : addTnPvarMuon(0,18)
+addTnPEle16 = lambda : addTnPvarEle(0,16)
+#addTnPEle17 = lambda : addTnPvarEle(0,17,"Fall17_17Nov2017_V32_MC")
+addTnPEle17 = lambda : addTnPvarEle(0,17)
+addTnPEle18 = lambda : addTnPvarEle(0,18)
 
-addTnPMuon16data = lambda : addTnPvarMuon(1,16)
-#addTnPMuon17data = lambda : addTnPvarMuon(1,17,"Fall17_17Nov2017_V32_DATA")
-addTnPMuon17data = lambda : addTnPvarMuon(1,17)
-addTnPMuon18data = lambda : addTnPvarMuon(1,18)
-addTnPMuon   = lambda : addTnPvarMuon(0,17)
-#addTnPMuonForMoriond18  = lambda : addTnPvarMuon(0,18, "Autumn18_V3_MC")
-#addTnPMuonForMoriond18data  = lambda : addTnPvarMuon(1,18, "Autumn18_V3_DATA")
-addTnPMuonForMoriond18  = lambda : addTnPvarMuon(0,18)
-addTnPMuonForMoriond18data  = lambda : addTnPvarMuon(1,18)
+addTnPEle16data = lambda : addTnPvarEle(1,16)
+#addTnPEle17data = lambda : addTnPvarEle(1,17,"Fall17_17Nov2017_V32_DATA")
+addTnPEle17data = lambda : addTnPvarEle(1,17)
+addTnPEle18data = lambda : addTnPvarEle(1,18)
+addTnPEle   = lambda : addTnPvarEle(0,17)
+#addTnPEleForMoriond18  = lambda : addTnPvarEle(0,18, "Autumn18_V3_MC")
+#addTnPEleForMoriond18data  = lambda : addTnPvarEle(1,18, "Autumn18_V3_DATA")
+addTnPEleForMoriond18  = lambda : addTnPvarEle(0,18)
+addTnPEleForMoriond18data  = lambda : addTnPvarEle(1,18)

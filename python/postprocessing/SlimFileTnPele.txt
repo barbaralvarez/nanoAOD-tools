@@ -1,0 +1,32 @@
+drop Tau*
+
+drop CaloMET*
+drop FatJet*
+drop GenJetAK8*
+drop GenVisTau*
+drop Photon*
+drop PuppiMET*
+drop fixedGrid*
+drop L1simulation_step
+drop SoftActivityJet*
+drop SubJet*
+drop TkMET*
+drop OtherPV*
+drop SV*
+drop Muon_*
+
+# Select these trigger paths:
+drop *
+keep Electron_*
+keep fixedGridRhoFastjetAll
+keep nJet
+keep Jet_*
+keep Pileup_*
+keep METFixEE2017_*
+keep MET_*
+keep HLT_Ele35*
+keep TnP_*
+keep Probe_*
+keep Tag_*
+keep nTrigObj
+keep TrigObj*
